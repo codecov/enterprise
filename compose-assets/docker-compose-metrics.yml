@@ -1,0 +1,122 @@
+version: '3'
+
+services:
+  traefik:
+    image: traefik:v1.7-alpine
+    # NOTE: quotes do not work in these commands
+    command:
+      - --api
+      - --docker
+      - --docker.watch
+      - --docker.constraints=tag==web
+      - --metrics
+      - --metrics.prometheus
+
+      # NOTE: Toggle the lines below to enable SSL
+      - --entryPoints=Name:http Address::80 Compress::true
+      - --defaultEntryPoints=http
+      # - --entrypoints=Name:http Address::80 Redirect.EntryPoint:https Compress::true
+      # - --entryPoints=Name:https Address::443 TLS:/ssl/ssl.crt,/ssl/ssl.key Compress::true
+      # - --defaultentrypoints=http,https
+
+    volumes:
+      - /var/run/docker.sock:/var/run/docker.sock:rw
+      - /dev/null:/traefik.toml:rw
+      # NOTE: Provide the SSL certs in the ./config folder below
+      # - ./config:/ssl
+    ports:
+      - '80:80'
+      - '8080:8080'
+      - '443:443'
+    networks:
+      - codecov
+    depends_on:
+      - web
+  web:
+    image: codecov/enterprise:v4.4.7
+    command: web
+    volumes:
+      - ./codecov.yml:/config/codecov.yml:ro
+      - archive-volume:/archive
+    ports:
+      - '5000'
+    labels:
+      - 'traefik.tags=web'
+      - 'traefik.backend=web'
+      - 'traefik.port=5000'
+      - 'traefik.frontend.rule=PathPrefix: /'
+    environment:
+      - STATSD_HOST=statsd
+      - DATADOG_TRACE_ENABLED=false
+    networks:
+      - codecov
+    depends_on:
+      - minio
+      - statsd
+
+  worker:
+    image: codecov/enterprise:v4.4.7
+    command: worker
+    volumes:
+      - ./codecov.yml:/config/codecov.yml:ro
+      - archive-volume:/archive
+    environment:
+      - STATSD_HOST=statsd
+      - DATADOG_TRACE_ENABLED=false
+    networks:
+      - codecov
+    depends_on:
+      - minio
+      - statsd
+
+  redis:
+    image: redis:4.0-alpine
+    volumes:
+      - redis-volume:/data
+    networks:
+      - codecov
+
+  postgres:
+    image: postgres:10-alpine
+    volumes:
+      - postgres10-volume:/var/lib/postgresql/data
+    ports:
+      - '9432:5432'
+    networks:
+      - codecov
+
+  minio:
+    image: minio/minio:RELEASE.2018-08-02T23-11-36Z
+    command: server /export
+    labels:
+      - 'traefik.tags=web'
+      - 'traefik.backend=minio'
+      - 'traefik.port=9000'
+      - 'traefik.frontend.rule=PathPrefix: /archive,/minio'
+    ports:
+      - '9000'
+    environment:
+      - MINIO_ACCESS_KEY=codecov-default-key
+      - MINIO_SECRET_KEY=codecov-default-secret
+    volumes:
+      - archive-volume:/export
+    networks:
+      - codecov
+
+  statsd:
+    image: prom/statsd-exporter:v0.6.0
+    command: -statsd.listen-udp=:8125 -statsd.listen-tcp=:8125
+    ports:
+      - '8125'
+      - '9102'
+    networks:
+      - codecov
+
+volumes:
+  postgres10-volume:
+  redis-volume:
+  archive-volume:
+
+networks:
+  codecov:
+    driver: bridge
