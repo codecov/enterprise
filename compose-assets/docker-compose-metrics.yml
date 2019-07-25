@@ -85,6 +85,17 @@ services:
     networks:
       - codecov
 
+  postgres_exporter:
+    image: wrouesnel/postgres_exporter
+    ports:
+      - '9187:9187'
+    environment:
+      - DATA_SOURCE_NAME=postgresql://postgres@postgres:9432/data?sslmode=disable
+    depends_on:
+      - postgres
+    networks:
+      - codecov
+
   minio:
     image: minio/minio:RELEASE.2018-08-02T23-11-36Z
     command: server /export
@@ -107,8 +118,46 @@ services:
     image: prom/statsd-exporter:v0.6.0
     command: -statsd.listen-udp=:8125 -statsd.listen-tcp=:8125
     ports:
-      - '8125'
-      - '9102'
+      - '8125:8125'
+      - '9102:9102'
+    networks:
+      - codecov
+
+  grafana:
+    image: codecov/grafana
+    labels:
+      - 'traefik.tags=web'
+      - 'traefik.backend=grafana'
+      - 'traefik.port=3000'
+      - 'traefik.frontend.rule=Host: grafana.${DNS:-localhost}'
+    ports:
+      - '3000:3000'
+    networks:
+      - codecov
+    depends_on:
+      - web
+
+  celery_exporter:
+    image: ovalmoney/celery-exporter
+    command: --listen-address 0.0.0.0:8888
+    ports:
+      - '8888:8888'
+    depends_on:
+      - redis
+    networks:
+      - codecov
+
+  prometheus:
+    image: codecov/prometheus
+    labels:
+      - 'traefik.tags=web'
+      - 'traefik.backend=prometheus'
+      - 'traefik.port=9090'
+      - 'traefik.frontend.rule=Host: prometheus.${DNS:-localhost}'
+    volumes:
+      - prometheus-volume:/prometheus
+    ports:
+      - '9090:9090'
     networks:
       - codecov
 
@@ -116,6 +165,7 @@ volumes:
   postgres10-volume:
   redis-volume:
   archive-volume:
+  prometheus-volume:
 
 networks:
   codecov:
